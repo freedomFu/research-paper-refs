@@ -15,7 +15,7 @@
     （身份认证、HCI、Web、其他）。
   - `2x-conference-*.bib` —— 会议论文，按相同主题分组。
   - `3x-url-*.bib` —— 网络资源（身份认证、HCI、Web、通用）。
-  - `41-techreport-*.bib` —— 技术报告。
+  - `4x-techreport-*.bib` —— 技术报告。
   - `5x-degree-*.bib` —— 学位论文（博士 / 硕士）。
 - `scripts/merge_bib.py` —— 用于将 `refs/` 中的所有文件合并为 `bb.bib` 的脚本。
 
@@ -33,6 +33,44 @@
 ```bash
 python scripts/merge_bib.py
 ```
+
+脚本同时支持自定义输入、输出路径和文件名正则：
+
+```bash
+# 默认：合并 refs/*-local.bib 到 bb.bib，并扫描重复条目。
+python scripts/merge_bib.py
+
+# 自定义输出文件。
+python scripts/merge_bib.py -o all-refs.bib
+
+# 多个输入（目录或单个 .bib 文件均可混用）。
+python scripts/merge_bib.py refs other_dir refs/extra.bib
+
+# 修改目录内文件名的匹配规则（对文件名做正则匹配）。
+python scripts/merge_bib.py -p '\.bib$'
+
+# 跳过重复标题扫描。
+python scripts/merge_bib.py --no-dedup
+
+# 在合并前，把每个输入文件里的条目按「年份升序 + key 前缀字典序」排序。
+# 默认开启；用 --no-sort 保留原始顺序。
+python scripts/merge_bib.py --no-sort
+
+# 同样的排序，并且把排序结果**写回** refs/ 中的源文件。
+python scripts/merge_bib.py --sort-in-place
+```
+
+合并完成后，脚本会输出：
+
+- **不以 4 位年份结尾**的条目 key（往往是命名规范没遵守）。
+- **重复条目分组** —— `@类型` 相同、并且标题在「小写化 + 去掉所有非字母数字」
+  之后相同的条目会被列出，方便手动清理。重复条目**只会被标记**，不会被自动
+  删除。
+
+**排序细节。** 排序键取 cite key 末尾的 4 位年份（升序），再按 key 前缀做
+小写字典序。条目正上方紧邻的注释和空行会跟随该条目一起移动，因此 `% === 2005 ===`
+这类分组横幅会保持贴在所属年份的第一条上面。第一条 `@entry` 之前的所有内容会
+被当作文件头原样保留。
 
 在你的 LaTeX 项目中引用 `bb.bib`，或按需复制单条条目即可。
 

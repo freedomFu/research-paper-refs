@@ -15,7 +15,7 @@ Each entry follows the pattern: **`Author + Topic/Venue + Year`**
     (authentication, HCI, web, other).
   - `2x-conference-*.bib` — conference papers, grouped by the same topics.
   - `3x-url-*.bib` — web resources (authentication, HCI, web, general).
-  - `41-techreport-*.bib` — technical reports.
+  - `4x-techreport-*.bib` — technical reports.
   - `5x-degree-*.bib` — theses (doctoral / master's).
 - `scripts/merge_bib.py` — utility to merge all files in `refs/` into `bb.bib`.
 
@@ -35,6 +35,46 @@ combined bibliography:
 ```bash
 python scripts/merge_bib.py
 ```
+
+The script also accepts custom inputs, output paths, and a filename regex:
+
+```bash
+# Defaults: merge refs/*-local.bib into bb.bib, then scan for duplicates.
+python scripts/merge_bib.py
+
+# Custom output file.
+python scripts/merge_bib.py -o all-refs.bib
+
+# Multiple inputs (directories and/or individual .bib files).
+python scripts/merge_bib.py refs other_dir refs/extra.bib
+
+# Change which filenames are picked up inside a directory (regex on basename).
+python scripts/merge_bib.py -p '\.bib$'
+
+# Skip the duplicate-title scan.
+python scripts/merge_bib.py --no-dedup
+
+# Sort each input file's entries by (year asc, key-prefix asc) before merging.
+# Sorting is on by default; use --no-sort to keep the original order.
+python scripts/merge_bib.py --no-sort
+
+# Same sort, but also rewrite the source files in refs/ in place.
+python scripts/merge_bib.py --sort-in-place
+```
+
+After merging, the script prints:
+
+- Entry keys that don't end with a 4-digit year (likely naming-convention slips).
+- **Duplicate groups** — entries sharing the same `@type` and a normalized
+  title (lowercased, all non-alphanumeric characters stripped) are reported so
+  you can clean them up by hand. Duplicates are *only flagged*, never deleted
+  automatically.
+
+**Sorting details.** Entries are reordered by the trailing 4-digit year in the
+cite key (ascending), then by the lowercased key prefix. Any comment or blank
+line immediately above an entry travels with that entry, so banner comments
+like `% === 2005 ===` stay attached to their first entry. Anything before the
+first `@entry` is treated as a file header and left untouched.
 
 Cite `bb.bib` from your LaTeX project, or copy individual entries as needed.
 
