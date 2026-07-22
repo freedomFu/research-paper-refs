@@ -90,12 +90,19 @@ TITLE_RE = re.compile(r'(?:^|[^A-Za-z])title\s*=\s*[\{"]', re.IGNORECASE)
 
 def extract_title(entry_body):
     """Return the raw title field value, or '' if not found."""
-    m = TITLE_RE.search(entry_body)
+    return extract_field(entry_body, 'title')
+
+
+def extract_field(entry_body, field):
+    """Return a braced or quoted BibTeX field value, or '' if absent."""
+    field_re = re.compile(
+        rf'(?:^|[^A-Za-z]){re.escape(field)}\s*=\s*[\{{"]', re.IGNORECASE
+    )
+    m = field_re.search(entry_body)
     if not m:
         return ''
     i = m.end() - 1
     opener = entry_body[i]
-    closer = '}' if opener == '{' else '"'
     if opener == '{':
         depth = 1
         i += 1
@@ -106,15 +113,20 @@ def extract_title(entry_body):
             elif entry_body[i] == '}':
                 depth -= 1
                 if depth == 0:
-                    return entry_body[start:i]
+                    return entry_body[start:i].strip()
             i += 1
-        return entry_body[start:i]
-    else:
+        return entry_body[start:i].strip()
+    i += 1
+    start = i
+    escaped = False
+    while i < len(entry_body):
+        if entry_body[i] == '"' and not escaped:
+            return entry_body[start:i].strip()
+        escaped = entry_body[i] == '\\' and not escaped
+        if entry_body[i] != '\\':
+            escaped = False
         i += 1
-        start = i
-        while i < len(entry_body) and entry_body[i] != closer:
-            i += 1
-        return entry_body[start:i]
+    return entry_body[start:i].strip()
 
 
 def normalize_title(title):
@@ -134,24 +146,78 @@ def find_duplicates(text):
     return {k: v for k, v in groups.items() if len(v) > 1}
 
 
-def entry_sort_key(bib_key):
-    """Sort key: (year, prefix_lower).
+def find_duplicate_identifiers(text, field):
+    """Return duplicate groups for a case-insensitive identifier field."""
+    groups = defaultdict(list)
+    for _etype, key, body, _, _ in iter_entries(text):
+        value = extract_field(body, field).strip().lower()
+        if field.lower() == 'doi':
+            value = re.sub(r'^https?://(?:dx\.)?doi\.org/', '', value)
+            value = re.sub(r'^doi:\s*', '', value)
+        if value:
+            groups[value].append(key)
+    return {value: keys for value, keys in groups.items() if len(keys) > 1}
+
+
+def find_duplicate_keys(text):
+    """Return duplicate cite keys (case-insensitive)."""
+    groups = defaultdict(list)
+    for _etype, key, _body, _, _ in iter_entries(text):
+        groups[key.lower()].append(key)
+    return {key: values for key, values in groups.items() if len(values) > 1}
+
+
+def validate_entries(text):
+    """Return human-readable warnings for missing core bibliography fields."""
+    warnings = []
+    dated_types = {
+        'article', 'book', 'inbook', 'incollection', 'inproceedings',
+        'manual', 'mastersthesis', 'phdthesis', 'proceedings', 'techreport',
+    }
+    for etype, key, body, _, _ in iter_entries(text):
+        kind = etype.lower()
+        missing = []
+        if not extract_field(body, 'title'):
+            missing.append('title')
+        if kind in dated_types and not (
+            extract_field(body, 'year') or extract_field(body, 'date')
+        ):
+            missing.append('year/date')
+        if kind == 'article' and not (
+            extract_field(body, 'journal') or extract_field(body, 'journaltitle')
+        ):
+            missing.append('journal/journaltitle')
+        if kind == 'inproceedings' and not extract_field(body, 'booktitle'):
+            missing.append('booktitle')
+        if kind == 'techreport' and not extract_field(body, 'institution'):
+            missing.append('institution')
+        if kind == 'manual' and not (
+            extract_field(body, 'url') or extract_field(body, 'note')
+        ):
+            missing.append('url/note')
+        if missing:
+            warnings.append(f"{key} (@{etype}): missing {', '.join(missing)}")
+    return warnings
+
+
+def entry_sort_key(bib_key, entry_body='', order='year-asc'):
+    """Sort by explicit year/date, falling back to the cite-key suffix.
 
     The trailing 4 digits of `bib_key` are treated as the year; if missing,
     the entry sinks to the bottom (year = 9999) and is ordered by the full
     lowercased key.
     """
-    m = re.search(r'(\d{4})$', bib_key)
-    if m:
-        year = int(m.group(1))
-        prefix = bib_key[:m.start()].lower()
-    else:
-        year = 9999
-        prefix = bib_key.lower()
-    return (year, prefix)
+    if order == 'key':
+        return (bib_key.lower(),)
+    raw_year = extract_field(entry_body, 'year') or extract_field(entry_body, 'date')
+    m = re.search(r'\d{4}', raw_year) or re.search(r'(\d{4})$', bib_key)
+    year = int(m.group(0)) if m else None
+    if order == 'year-desc':
+        return (-(year if year is not None else -1), bib_key.lower())
+    return (year if year is not None else 9999, bib_key.lower())
 
 
-def sort_entries_in_text(text):
+def sort_entries_in_text(text, order='year-asc'):
     """Re-emit `text` with its @entries sorted by (year, prefix).
 
     Any non-entry text (comments, blank lines) that sits between two entries
@@ -165,9 +231,9 @@ def sort_entries_in_text(text):
 
     header = text[:entries[0][3]]
     chunks = []  # (sort_key, chunk_text)
-    for idx, (_etype, key, _body, start, end) in enumerate(entries):
+    for idx, (_etype, key, body, start, end) in enumerate(entries):
         chunk_start = entries[idx - 1][4] if idx > 0 else entries[0][3]
-        chunks.append((entry_sort_key(key), text[chunk_start:end]))
+        chunks.append((entry_sort_key(key, body, order), text[chunk_start:end]))
     trailing = text[entries[-1][4]:]
 
     chunks.sort(key=lambda kv: kv[0])
@@ -201,6 +267,15 @@ def parse_args(argv):
         '--sort-in-place', action='store_true',
         help='Also rewrite each source file with its entries sorted.',
     )
+    p.add_argument(
+        '--sort-order', choices=('year-asc', 'year-desc', 'key'),
+        default='year-asc',
+        help='Entry order within each input file (default: year-asc).',
+    )
+    p.add_argument(
+        '--no-validate', action='store_true',
+        help='Skip checks for missing core fields.',
+    )
     return p.parse_args(argv)
 
 
@@ -226,7 +301,7 @@ def main(argv=None):
         with open(path, 'r', encoding='utf-8') as fh:
             text = fh.read()
         if not args.no_sort:
-            sorted_text = sort_entries_in_text(text)
+            sorted_text = sort_entries_in_text(text, args.sort_order)
             if args.sort_in_place and sorted_text != text:
                 with open(path, 'w', encoding='utf-8') as fh:
                     fh.write(sorted_text)
@@ -252,6 +327,18 @@ def main(argv=None):
 
     # Duplicate detection.
     if not args.no_dedup:
+        duplicate_keys = find_duplicate_keys(merged)
+        if duplicate_keys:
+            print(f"\nDuplicate cite keys detected ({len(duplicate_keys)} group(s)):")
+            for _normalized, keys in duplicate_keys.items():
+                print(f"  {', '.join(keys)}")
+
+        duplicate_dois = find_duplicate_identifiers(merged, 'doi')
+        if duplicate_dois:
+            print(f"\nDuplicate DOIs detected ({len(duplicate_dois)} group(s)):")
+            for doi, keys in duplicate_dois.items():
+                print(f"  {doi}: {', '.join(keys)}")
+
         dups = find_duplicates(merged)
         if dups:
             print(f"\nDuplicate entries detected ({len(dups)} group(s)):")
@@ -264,6 +351,15 @@ def main(argv=None):
                     print(f"    {key}  |  {short}")
         else:
             print("\nNo duplicate titles found.")
+
+    if not args.no_validate:
+        warnings = validate_entries(merged)
+        if warnings:
+            print(f"\nCore-field warnings ({len(warnings)}):")
+            for warning in warnings:
+                print(f"  {warning}")
+        else:
+            print("\nAll entries contain their core fields.")
 
     return 0
 

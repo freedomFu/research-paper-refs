@@ -26,6 +26,10 @@ Each entry follows the pattern: **`Author + Topic/Venue + Year`**
 - Any trimming or shortening (e.g., dropping `pages`, replacing a long URL with a
   short link) should only be done in the per-paper working copy of the bibliography
   for a specific manuscript, never in this library.
+- Conference papers must contain an explicit `year = {YYYY}` field.
+- By local convention, web resources remain `@manual` entries with URLs in
+  `note = {\url{...}}`.
+- Use BibTeX month macros (`jan` through `dec`) instead of mixed month strings.
 
 ## Usage
 
@@ -60,6 +64,13 @@ python scripts/merge_bib.py --no-sort
 
 # Same sort, but also rewrite the source files in refs/ in place.
 python scripts/merge_bib.py --sort-in-place
+
+# Put newest entries first (or use "key" for cite-key ordering).
+python scripts/merge_bib.py --sort-order year-desc
+
+# Preview/apply conservative year and month normalization.
+python scripts/normalize_bib.py
+python scripts/normalize_bib.py --write
 ```
 
 After merging, the script prints:
@@ -69,9 +80,11 @@ After merging, the script prints:
   title (lowercased, all non-alphanumeric characters stripped) are reported so
   you can clean them up by hand. Duplicates are *only flagged*, never deleted
   automatically.
+- Duplicate cite keys (case-insensitive), duplicate DOIs, and missing core fields.
 
-**Sorting details.** Entries are reordered by the trailing 4-digit year in the
-cite key (ascending), then by the lowercased key prefix. Any comment or blank
+**Sorting details.** Entries are ordered by their explicit `year`/`date` field,
+falling back to the trailing cite-key year, then by the full lowercased key.
+`--sort-order` supports `year-asc`, `year-desc`, and `key`. Any comment or blank
 line immediately above an entry travels with that entry, so banner comments
 like `% === 2005 ===` stay attached to their first entry. Anything before the
 first `@entry` is treated as a file header and left untouched.
